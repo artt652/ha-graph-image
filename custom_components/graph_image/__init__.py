@@ -47,7 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         in_folderfile = service.data.get('in_folderfile', '/config/www/graph.png') # путь и имя для сохранения
         in_linesmooth = service.data.get('in_linesmooth', 1) # уровень сглаживания
         in_lineinterp = service.data.get('in_lineinterp', 'linear_interp') # вид графика
-        in_size_inches = service.data.get('in_size_inches', '8,6') # размер картинки
+        in_size_inches = service.data.get('in_size_inches', '17,12') # размер картинки
         entity_ids = service.data["entity_id"]      
         plt.close()
         plt.style.use(in_style) # стиль графика
