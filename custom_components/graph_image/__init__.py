@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import logging
+import asyncio
 
 DOMAIN = 'graph_image'
 _LOGGER = logging.getLogger(__name__)
@@ -24,6 +25,18 @@ async def async_setup(hass, hass_config):
 
 async def async_setup_entry(hass: HomeAssistant, entry):
 
+    async def save_figure_async(fig, filename):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, fig.savefig, filename)
+
+    async def create_subplots_async():
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, plt.subplots)
+
+    async def close_figure_async(fig):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, plt.close, fig)
+
     async def create_graph_image(service: ServiceCall) -> None:
         time_start = dt_util.utcnow() - timedelta(hours=service.data.get('in_time_start', 12)) # дата начала
         time_end = dt_util.utcnow() - timedelta(hours=service.data.get('in_time_end', 0)) # дата окончания
@@ -34,17 +47,16 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         in_folderfile = service.data.get('in_folderfile', '/config/www/graph.png') # путь и имя для сохранения
         in_linesmooth = service.data.get('in_linesmooth', 1) # уровень сглаживания
         in_lineinterp = service.data.get('in_lineinterp', 'linear_interp') # вид графика
-        in_size_inches = service.data.get('in_size_inches', '17,12') # размер картинки
-        entity_ids = service.data["entity_id"]
+        in_size_inches = service.data.get('in_size_inches', '8,6') # размер картинки
+        entity_ids = service.data["entity_id"]      
         plt.close()
         plt.style.use(in_style) # стиль графика
         include_start_time_state = True
         no_attributes = True
 
         xFmt = mdates.DateFormatter('%m-%d %H:%M', tz=hass.config.time_zone)
-        fig = plt.figure(tight_layout=True)
+        fig, ax = await create_subplots_async()
         fig.set_size_inches(int(in_size_inches.split(',')[0]), int(in_size_inches.split(',')[1]), forward=True) # размеры графика
-        ax = fig.add_subplot(1,1,1)
         ax.margins(x=0) # убираем все поля лишние по бокам
         plt.xticks(size = in_size_ticks) # size размер подписи по оси x
         plt.yticks(size = in_size_ticks) # size размер подписи по оси y
@@ -88,8 +100,15 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         ax.xaxis.set_major_formatter(xFmt)
         ax.legend(loc=2, ncol=2, shadow = True, fancybox = True, framealpha = 0.5, fontsize = 14) # подпись сенсоров
         fig.autofmt_xdate()
-        await hass.async_add_executor_job(fig.savefig, in_folderfile)
-        plt.close()
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        # Save figure asynchronously
+        await save_figure_async(fig, in_folderfile)
+
+        # Close figure asynchronously
+        await close_figure_async(fig)
 
     hass.services.async_register(DOMAIN, 'create_graph_image', create_graph_image)
 
