@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import logging
 import asyncio
+from homeassistant.util.async_ import run_callback_threadsafe
 
 DOMAIN = 'graph_image'
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         time_end = dt_util.utcnow() - timedelta(hours=service.data.get('in_time_end', 0)) # дата окончания
         in_style = service.data.get('in_style', 'Solarize_Light2') # стиль графика
         in_size_ticks = service.data.get('in_size_ticks', 10) # размер подписи осей
-        in_rate_ticks = service.data.get('in_rate_ticks', False) # размер подписи осей
+        in_rate_ticks = service.data.get('in_rate_ticks', False) # частота делений по оси X
         in_linewidth = service.data.get('in_linewidth', 1) # толщина линии
         in_folderfile = service.data.get('in_folderfile', '/config/www/graph.png') # путь и имя для сохранения
         in_linesmooth = service.data.get('in_linesmooth', 1) # уровень сглаживания
@@ -54,14 +55,18 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         include_start_time_state = True
         no_attributes = True
 
-        xFmt = mdates.DateFormatter('%m-%d %H:%M', tz=hass.config.time_zone)
+        # Получаем временную зону асинхронно
+        loop = hass.loop
+        tz = run_callback_threadsafe(loop, lambda: hass.config.time_zone).result()
+        xFmt = mdates.DateFormatter('%m-%d %H:%M', tz=tz)
+
         fig, ax = await create_subplots_async()
         fig.set_size_inches(int(in_size_inches.split(',')[0]), int(in_size_inches.split(',')[1]), forward=True) # размеры графика
-        ax.margins(x=0) # убираем все поля лишние по бокам
-        plt.xticks(size = in_size_ticks) # size размер подписи по оси x
-        plt.yticks(size = in_size_ticks) # size размер подписи по оси y
+        ax.margins(x=0) # убираем поля по бокам
+        plt.xticks(size = in_size_ticks) # размер подписи по оси x
+        plt.yticks(size = in_size_ticks) # размер подписи по оси y
 
-        # проходимся по объектам, запрашиваем историю из компонента ha history и формируем график
+        # Формирование графика для каждого entity_id
         for row in entity_ids:
             entity = hass.states.get(row)
             hist_entity =  await get_instance(hass).async_add_executor_job(history.state_changes_during_period, hass, time_start, time_end, row, include_start_time_state, no_attributes)
@@ -73,7 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry):
                 his_state = rec.state
                 his_last_updated = rec.last_updated
                 try:
-                    float(his_state) # для проверки что на входе число, иначе в исключение и продолжаем дальше
+                    float(his_state) # проверяем, что значение можно преобразовать в float
                     x_axis.append(his_last_updated)
                     y_axis.append(his_state)
                 except ValueError:
@@ -82,8 +87,8 @@ async def async_setup_entry(hass: HomeAssistant, entry):
             if x_axis != [] and y_axis != []:
                 x_axis = np.array(x_axis)
                 y_axis = np.array(y_axis).astype('float32')
-                w=np.hanning(in_linesmooth) # сглаживание графика
-                y_axis2=np.convolve(w/w.sum(),y_axis,mode='same')
+                w = np.hanning(in_linesmooth) # сглаживание графика
+                y_axis2 = np.convolve(w/w.sum(), y_axis, mode='same')
 
                 if in_lineinterp == 'linear_interp':
                     ax.plot(x_axis, y_axis2, label=label_name, linewidth = in_linewidth)
@@ -91,23 +96,23 @@ async def async_setup_entry(hass: HomeAssistant, entry):
                     new_where = 'pre' if in_lineinterp == 'vert_first' else 'post'
                     ax.step(x_axis, y_axis2, label=label_name, where = new_where, linewidth = in_linewidth)
 
-        # в зависимости от кол-ва дней, разницы time_end и in_start, частота делений по x или пропускаем и автоматически
+        # Настройка частоты делений по оси X
         if not in_rate_ticks:
             diff_day = time_end - time_start
             new_interval = 1 if diff_day.days <= 1 else diff_day.days * 2
-            ax.xaxis.set_major_locator(mdates.HourLocator(interval = new_interval))
+            ax.xaxis.set_major_locator(mdates.HourLocator(interval=new_interval))
 
         ax.xaxis.set_major_formatter(xFmt)
-        ax.legend(loc=2, ncol=2, shadow = True, fancybox = True, framealpha = 0.5, fontsize = 14) # подпись сенсоров
+        ax.legend(loc=2, ncol=2, shadow=True, fancybox=True, framealpha=0.5, fontsize=14) # подпись сенсоров
         fig.autofmt_xdate()
+
+        # Выполняем plt.tight_layout() в пуле потоков
+        await hass.async_add_executor_job(plt.tight_layout)
         
-        # Adjust layout
-        plt.tight_layout()
-        
-        # Save figure asynchronously
+        # Сохранение графика асинхронно
         await save_figure_async(fig, in_folderfile)
 
-        # Close figure asynchronously
+        # Закрываем фигуру асинхронно
         await close_figure_async(fig)
 
     hass.services.async_register(DOMAIN, 'create_graph_image', create_graph_image)
