@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import logging
 import asyncio
-from homeassistant.util.async_ import run_callback_threadsafe
 
 DOMAIN = 'graph_image'
 _LOGGER = logging.getLogger(__name__)
@@ -55,9 +54,8 @@ async def async_setup_entry(hass: HomeAssistant, entry):
         include_start_time_state = True
         no_attributes = True
 
-        # Получаем временную зону асинхронно
-        loop = hass.loop
-        tz = run_callback_threadsafe(loop, lambda: hass.config.time_zone).result()
+        # Получаем временную зону напрямую, без использования run_callback_threadsafe
+        tz = hass.config.time_zone
         xFmt = mdates.DateFormatter('%m-%d %H:%M', tz=tz)
 
         fig, ax = await create_subplots_async()
