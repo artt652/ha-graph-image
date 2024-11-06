@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 DOMAIN = 'graph_image'
 _LOGGER = logging.getLogger(__name__)
 
+executor = ThreadPoolExecutor()
+
 async def async_setup(hass, hass_config):
     if DOMAIN in hass_config and not hass.config_entries.async_entries(DOMAIN):
         hass.async_create_task(hass.config_entries.flow.async_init(
@@ -27,20 +29,34 @@ async def async_setup_entry(hass: HomeAssistant, entry):
 
     async def save_figure_async(fig, filename):
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, fig.savefig, filename)
+        # Выполняем сохранение графика в отдельном потоке
+        await loop.run_in_executor(executor, fig.savefig, filename)
 
     async def create_subplots_async():
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, plt.subplots)
+        # Создаем подграфики в отдельном потоке
+        return await loop.run_in_executor(executor, plt.subplots)
 
     async def close_figure_async(fig):
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, plt.close, fig)
+        # Закрываем график в отдельном потоке
+        await loop.run_in_executor(executor, plt.close, fig)
+
+    async def apply_autofmt_xdate(fig):
+        loop = asyncio.get_event_loop()
+        # Выполняем autofmt_xdate в отдельном потоке
+        await loop.run_in_executor(executor, fig.autofmt_xdate)
+
+    async def apply_tight_layout():
+        loop = asyncio.get_event_loop()
+        # Выполняем tight_layout в отдельном потоке
+        await loop.run_in_executor(executor, plt.tight_layout)
 
     # Функция для получения форматтера даты в пуле потоков
     async def get_date_formatter(tz):
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as pool:
+            # Форматирование дат также выполняем в отдельном потоке
             xFmt = await loop.run_in_executor(pool, mdates.DateFormatter, '%m-%d %H:%M', tz)
         return xFmt
 
@@ -111,10 +127,10 @@ async def async_setup_entry(hass: HomeAssistant, entry):
 
         ax.xaxis.set_major_formatter(xFmt)
         ax.legend(loc=2, ncol=2, shadow=True, fancybox=True, framealpha=0.5, fontsize=14)  # подписи сенсоров
-        fig.autofmt_xdate()
-
-        # Adjust layout
-        plt.tight_layout()
+        
+        # Применяем форматирование и компоновку в отдельном потоке
+        await apply_autofmt_xdate(fig)
+        await apply_tight_layout()
 
         # Save figure asynchronously
         await save_figure_async(fig, in_folderfile)
